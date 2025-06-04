@@ -1,5 +1,7 @@
 from django.shortcuts import render, redirect
 from django.http import HttpResponse
+from django.core.paginator import Paginator
+from .models import Attendee
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 import os
 from django.conf import settings
@@ -219,3 +221,19 @@ def flyer_preview_view(request, pk):
     except Attendee.DoesNotExist:
         messages.error(request, "Flyer not found.")
         return redirect('index')
+
+def attendee_list(request):
+    # Get all attendees ordered by creation date (newest first)
+    attendees_list = Attendee.objects.all().order_by('-created_at')
+    
+    # Paginate the attendees (10 per page)
+    paginator = Paginator(attendees_list, 10)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    context = {
+        'attendees': page_obj,
+        'page_obj': page_obj,  # For pagination controls
+        'is_paginated': paginator.num_pages > 1  # Show pagination only if needed
+    }
+    return render(request, 'list.html', context)
