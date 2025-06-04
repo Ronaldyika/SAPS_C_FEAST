@@ -1,0 +1,1 @@
+web: gunicorn symphonic_choir.wsgi
