@@ -39,81 +39,111 @@ def concert_registration_view(request):
     return render(request, 'index.html', {'form': form})
 
 
+import os
+from PIL import Image, ImageDraw, ImageFont
+from django.conf import settings
+from django.core.files.storage import default_storage
+import logging
+
+logger = logging.getLogger(__name__)
+
 def generate_personalized_flyer(registration):
     try:
-        flyer_filename = 'flyer.png'
-        flyer_path = os.path.join(settings.MEDIA_ROOT, flyer_filename)
+        # Predefined constants
+        FLYER_FILENAME = 'flyer.png'
+        OUTPUT_DIR = os.path.join(settings.MEDIA_ROOT, 'generated_flyers')
+        
+        # Cache paths and directories
+        flyer_path = os.path.join(settings.MEDIA_ROOT, FLYER_FILENAME)
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        output_path = os.path.join(OUTPUT_DIR, f'flyer_{registration.id}.png')
 
+        # Check if output already exists (cache)
+        if os.path.exists(output_path):
+            return output_path
+
+        # Validate and load base image
         if not os.path.exists(flyer_path):
             raise FileNotFoundError(f"Flyer base image not found at {flyer_path}")
 
-        base_img = Image.open(flyer_path).convert("RGBA")
-        draw = ImageDraw.Draw(base_img)
-        img_width, img_height = base_img.size
-        center_x = img_width // 2
+        with Image.open(flyer_path) as base_img:
+            base_img = base_img.convert("RGBA")
+            draw = ImageDraw.Draw(base_img)
+            img_width, img_height = base_img.size
+            center_x = img_width // 2
 
-        def load_font(path, size):
-            try:
-                return ImageFont.truetype(path, size)
-            except:
-                # Fallback to a bold version of default font if specified font not found
-                default_font = ImageFont.load_default()
-                if "bd" in path.lower():  # If trying to load bold font
-                    return ImageFont.load_default().font_variant(size=size, weight='bold')
-                return ImageFont.load_default(size)
+            # Font loading with caching
+            def load_font(path, size):
+                try:
+                    return ImageFont.truetype(path, size)
+                except IOError:
+                    try:
+                        # Try system fonts as fallback
+                        return ImageFont.truetype("arial.ttf", size) if "bd" not in path.lower() else ImageFont.truetype("arialbd.ttf", size)
+                    except IOError:
+                        # Final fallback to default font
+                        default_font = ImageFont.load_default()
+                        if "bd" in path.lower():
+                            return default_font.font_variant(size=size, weight='bold')
+                        return default_font.font_variant(size=size)
 
-        # Load larger and bolder fonts
-        name_font = load_font("arialbd.ttf", 60)  # Increased from 42 to 60
-        role_font = load_font("arialbd.ttf", 48)  # Increased from 32 to 48 and made bold
-        # time_font = load_font("arialbd.ttf", 28)  # Kept bold for consistency
+            # Preload fonts with optimized sizes
+            name_font = load_font("arialbd.ttf", 60)
+            role_font = load_font("arialbd.ttf", 48)
+            
+            current_y = 140  # Start position
 
-        current_y = 140  # start near top for image
+            # Handle user image if exists
+            if registration.image:
+                try:
+                    with default_storage.open(registration.image.name) as img_file:
+                        with Image.open(img_file) as user_img:
+                            user_img = user_img.convert("RGBA")
+                            size = 400
+                            
+                            # Create circular mask
+                            mask = Image.new('L', (size, size), 0)
+                            draw_mask = ImageDraw.Draw(mask)
+                            draw_mask.ellipse((0, 0, size, size), fill=255)
+                            
+                            # Resize and apply mask
+                            user_img = user_img.resize((size, size), Image.LANCZOS)
+                            circular_img = Image.new('RGBA', (size, size))
+                            circular_img.paste(user_img, (0, 0), mask)
+                            
+                            # Position and paste
+                            img_x = center_x - (size // 2)
+                            base_img.paste(circular_img, (img_x, current_y), circular_img)
+                            current_y += size + 40
+                except Exception as e:
+                    logger.warning(f"Error processing user image for registration {registration.id}: {str(e)}")
 
-        # --- Add user image at top center ---
-        if registration.image:
-            try:
-                with default_storage.open(registration.image.name) as img_file:
-                    user_img = Image.open(img_file).convert("RGBA")
-                    size = 400
-                    user_img = user_img.resize((size, size))
+            # Draw name with stroke (optimized text positioning)
+            name_text = registration.name.upper()
+            name_bbox = draw.textbbox((0, 0), name_text, font=name_font)
+            name_width = name_bbox[2] - name_bbox[0]
+            name_position = (center_x - name_width // 2, current_y)
+            draw.text(name_position, name_text, font=name_font, fill="white", 
+                     stroke_width=3, stroke_fill="black")
+            current_y += 75
 
-                    mask = Image.new('L', (size, size), 0)
-                    draw_mask = ImageDraw.Draw(mask)
-                    draw_mask.ellipse((0, 0, size, size), fill=255)
+            # Draw role with stroke
+            role_text = registration.role.upper()
+            role_bbox = draw.textbbox((0, 0), role_text, font=role_font)
+            role_width = role_bbox[2] - role_bbox[0]
+            role_position = (center_x - role_width // 2, current_y)
+            draw.text(role_position, role_text, font=role_font, fill="yellow", 
+                     stroke_width=3, stroke_fill="black")
 
-                    circular_img = Image.new('RGBA', (size, size))
-                    circular_img.paste(user_img, (0, 0), mask)
-
-                    img_x = center_x - (size // 2)
-                    base_img.paste(circular_img, (img_x, current_y), circular_img)
-                    current_y += size + 40  # more spacing after image
-            except Exception as e:
-                print(f"Error loading user image: {e}")
-
-        # --- Draw Name (larger, bold, with stroke) ---
-        name_text = registration.name.upper()
-        name_width = draw.textlength(name_text, font=name_font)
-        name_position = (center_x - name_width // 2, current_y)
-        draw.text(name_position, name_text, font=name_font, fill="white", stroke_width=3, stroke_fill="black")  # Increased stroke
-        current_y += 75  # Increased spacing
-
-        # --- Draw Role (larger, bold, with stroke) ---
-        role_text = registration.role.upper()
-        role_width = draw.textlength(role_text, font=role_font)
-        role_position = (center_x - role_width // 2, current_y)
-        draw.text(role_position, role_text, font=role_font, fill="yellow", stroke_width=3, stroke_fill="black")  # Increased stroke
-        # Save flyer
-        output_dir = os.path.join(settings.MEDIA_ROOT, 'generated_flyers')
-        os.makedirs(output_dir, exist_ok=True)
-        output_path = os.path.join(output_dir, f'flyer_{registration.id}.png')
-        base_img.save(output_path, quality=95)
-
-        return output_path
+            # Save optimized image
+            base_img.save(output_path, quality=85, optimize=True)
+            
+            return output_path
 
     except Exception as e:
-        print(f"Error generating personalized flyer: {e}")
-        raise
-
+        logger.error(f"Error generating flyer for registration {registration.id}: {str(e)}")
+        raise RuntimeError(f"Failed to generate flyer: {str(e)}")
+    
 def flyer_preview_view(request, pk):
     try:
         attendee = Attendee.objects.get(pk=pk)
