@@ -99,7 +99,7 @@ def generate_personalized_flyer(registration):
                     with default_storage.open(registration.image.name) as img_file:
                         with Image.open(img_file) as user_img:
                             user_img = user_img.convert("RGBA")
-                            size = 400
+                            size = 300
                             
                             # Create circular mask
                             mask = Image.new('L', (size, size), 0)
