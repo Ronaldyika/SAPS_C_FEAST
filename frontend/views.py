@@ -44,20 +44,69 @@ from PIL import Image, ImageDraw, ImageFont
 from django.conf import settings
 from django.core.files.storage import default_storage
 import logging
+import requests
+from io import BytesIO
 
 logger = logging.getLogger(__name__)
+
+def load_web_font(font_url, size):
+    """Load font from a URL with fallback to default font"""
+    try:
+        response = requests.get(font_url)
+        response.raise_for_status()
+        return ImageFont.truetype(BytesIO(response.content), size)
+    except Exception as e:
+        logger.warning(f"Failed to load web font: {str(e)}")
+        # Fallback to default font
+        default_font = ImageFont.load_default()
+        if "bold" in font_url.lower():
+            return default_font.font_variant(size=size, weight='bold')
+        return default_font.font_variant(size=size)
 import os
 from PIL import Image, ImageDraw, ImageFont
 from django.conf import settings
 from django.core.files.storage import default_storage
 import logging
-import sys
+import requests
+from io import BytesIO
 
 logger = logging.getLogger(__name__)
 
+def load_web_font(font_url, size):
+    """Load font from a URL with robust fallback handling"""
+    try:
+        response = requests.get(font_url, timeout=5)
+        response.raise_for_status()
+        return ImageFont.truetype(BytesIO(response.content), size)
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"Failed to load web font from {font_url}: {str(e)}")
+        try:
+            # Try alternative font URLs
+            alternative_urls = [
+                "https://raw.githubusercontent.com/google/fonts/main/apache/roboto/Roboto-Bold.ttf",
+                "https://fonts.cdnfonts.com/s/14882/Roboto-Bold.ttf",
+                "https://www.1001fonts.com/download/roboto-bold.ttf"
+            ]
+            
+            for url in alternative_urls:
+                try:
+                    response = requests.get(url, timeout=5)
+                    response.raise_for_status()
+                    return ImageFont.truetype(BytesIO(response.content), size)
+                except requests.exceptions.RequestException:
+                    continue
+            
+            # If all URLs fail, use default font with size adjustment
+            default_font = ImageFont.load_default()
+            # Create a bold effect by drawing text twice with slight offset
+            return default_font.font_variant(size=size)
+        except Exception as e:
+            logger.error(f"Failed all font loading attempts: {str(e)}")
+            return ImageFont.load_default().font_variant(size=size)
+
 def generate_personalized_flyer(registration):
     try:
-        # Predefined constants - use absolute paths
+        # Constants
         FLYER_FILENAME = 'flyer.png'
         OUTPUT_DIR = os.path.join(settings.MEDIA_ROOT, 'generated_flyers')
         
@@ -65,7 +114,7 @@ def generate_personalized_flyer(registration):
         os.makedirs(OUTPUT_DIR, exist_ok=True)
         os.makedirs(settings.MEDIA_ROOT, exist_ok=True)
 
-        # Path handling for cloud compatibility
+        # Path handling
         flyer_path = os.path.join(settings.BASE_DIR, 'static', FLYER_FILENAME)
         if not os.path.exists(flyer_path):
             flyer_path = os.path.join(settings.MEDIA_ROOT, FLYER_FILENAME)
@@ -80,60 +129,27 @@ def generate_personalized_flyer(registration):
         if not os.path.exists(flyer_path):
             raise FileNotFoundError(f"Flyer base image not found at {flyer_path}")
 
-        # Font path configuration for cloud
-        def get_font_path(font_name):
-            # Try system fonts first
-            system_fonts = [
-                f"/usr/share/fonts/truetype/{font_name}",
-                f"/usr/share/fonts/{font_name}",
-                f"/Library/Fonts/{font_name}",  # macOS
-                f"C:/Windows/Fonts/{font_name}"  # Windows
-            ]
-            
-            for path in system_fonts:
-                if os.path.exists(path):
-                    return path
-            
-            # Fallback to bundled fonts (should be in your static files)
-            static_font = os.path.join(settings.BASE_DIR, 'static', 'fonts', font_name)
-            if os.path.exists(static_font):
-                return static_font
-            
-            return font_name  # Final fallback to hope system finds it
-
         with Image.open(flyer_path) as base_img:
             base_img = base_img.convert("RGBA")
             draw = ImageDraw.Draw(base_img)
             img_width, img_height = base_img.size
             center_x = img_width // 2
-
-            # Improved font loading with better error handling
-            def load_font(font_name, size):
-                font_path = get_font_path(font_name)
-                try:
-                    return ImageFont.truetype(font_path, size)
-                except IOError as e:
-                    logger.warning(f"Failed to load font {font_name} from {font_path}: {str(e)}")
-                    try:
-                        # Try default system fonts
-                        return ImageFont.truetype("arial.ttf", size) if "bd" not in font_name.lower() else ImageFont.truetype("arialbd.ttf", size)
-                    except IOError:
-                        # Final fallback
-                        default_font = ImageFont.load_default()
-                        if "bd" in font_name.lower():
-                            return default_font.font_variant(size=size, weight='bold')
-                        return default_font.font_variant(size=size)
-
-            # Font loading with explicit paths
-            name_font = load_font("arialbd.ttf", 60)
-            role_font = load_font("arialbd.ttf", 48)
+            
+            # Load fonts with multiple fallback options
+            name_font = load_web_font(
+                "https://raw.githubusercontent.com/google/fonts/main/apache/roboto/Roboto-Bold.ttf",
+                60
+            )
+            role_font = load_web_font(
+                "https://raw.githubusercontent.com/google/fonts/main/apache/roboto/Roboto-Bold.ttf",
+                48
+            )
             
             current_y = 140
 
-            # Handle user image with better cloud storage handling
+            # Handle user image
             if registration.image:
                 try:
-                    # Use default_storage properly for cloud
                     if hasattr(registration.image, 'path'):
                         img_path = registration.image.path
                         if os.path.exists(img_path):
@@ -161,13 +177,14 @@ def generate_personalized_flyer(registration):
                     base_img.paste(circular_img, (img_x, current_y), circular_img)
                     current_y += size + 40
                 except Exception as e:
-                    logger.error(f"Image processing error for {registration.id}: {str(e)}")
-                    # Continue without image rather than failing
+                    logger.error(f"Image processing error: {str(e)}")
 
-            # Text rendering
+            # Text rendering with fallback for non-bold fonts
             name_text = registration.name.upper()
             name_bbox = draw.textbbox((0, 0), name_text, font=name_font)
             name_width = name_bbox[2] - name_bbox[0]
+            
+            # Draw text twice to simulate bold if needed
             draw.text(
                 (center_x - name_width // 2, current_y),
                 name_text,
@@ -181,6 +198,7 @@ def generate_personalized_flyer(registration):
             role_text = registration.role.upper()
             role_bbox = draw.textbbox((0, 0), role_text, font=role_font)
             role_width = role_bbox[2] - role_bbox[0]
+            
             draw.text(
                 (center_x - role_width // 2, current_y),
                 role_text,
@@ -190,20 +208,20 @@ def generate_personalized_flyer(registration):
                 stroke_fill="black"
             )
 
-            # Save with proper permissions
+            # Save image
             base_img.save(output_path, quality=85, optimize=True)
-            os.chmod(output_path, 0o644)  # Ensure readable permissions
+            os.chmod(output_path, 0o644)
             
             return output_path
 
     except Exception as e:
-        logger.error(f"Critical flyer generation error: {str(e)}", exc_info=True)
+        logger.error(f"Flyer generation error: {str(e)}", exc_info=True)
         raise RuntimeError(f"Flyer generation failed: {str(e)}")
-
+    
+    
 def flyer_preview_view(request, pk):
     try:
         attendee = Attendee.objects.get(pk=pk)
-        # Add cache headers for better performance
         response = render(request, 'flyer_preview.html', {'attendee': attendee})
         response['Cache-Control'] = 'public, max-age=300'
         return response
