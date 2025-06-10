@@ -121,16 +121,22 @@
                                 <label for="{{ form.email.id_for_label }}">Email Address</label>
                             </div>
                         </div>
-                        <div class="col-md-6">
-                            <div class="file-upload">
-                                <label class="upload-label">
-                                    <i class="fas fa-camera me-2"></i>
-                                    {{ form.image.label }}
-                                    {{ form.image }}
-                                    <span class="file-name">No file chosen</span>
-                                </label>
-                            </div>
-                        </div>
+<div class="col-md-6">
+    <div class="file-upload">
+        <label for="{{ form.image.id_for_label }}" class="upload-label">
+            <i class="fas fa-camera me-2"></i>
+            {{ form.image.label_tag }}
+        </label>
+        {{ form.image }}
+        <span class="file-name">No passport-sized photo chosen</span>
+        <small class="form-text text-muted">Upload a passport-sized photo (max 700x700 pixels).</small>
+
+        {% if form.image.errors %}
+            <div class="text-danger mt-1">{{ form.image.errors }}</div>
+        {% endif %}
+    </div>
+</div>
+
                         <div class="col-12 text-center mt-4">
                             <button type="submit" class="btn btn-primary">
                                 Generate My Card <i class="fas fa-id-card ms-2"></i>
