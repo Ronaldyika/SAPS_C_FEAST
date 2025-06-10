@@ -27,7 +27,7 @@ class ConcertRegistrationForm(forms.ModelForm):
             img = Image.open(image)
             width, height = img.size
 
-            if width > 3000 or height > 3000:
+            if width > 2600 or height > 4000:
                 raise forms.ValidationError("Image must be no larger than 1000x1000 pixels.")
 
             # Optional: Resize image to 600x600 if needed
