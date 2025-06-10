@@ -151,7 +151,7 @@ def generate_personalized_flyer(registration):
                 user_img = Image.open(img_file).convert("RGBA")
 
                 # --- Trim uploaded image to passport size (600x600) ---
-                passport_size = (500, 500)
+                passport_size = (600, 600)
                 img_w, img_h = user_img.size
                 crop_w, crop_h = passport_size
 
